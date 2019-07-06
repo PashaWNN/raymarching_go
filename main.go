@@ -1,13 +1,13 @@
 package main
 
 import (
-	"fmt"
 	mat "github.com/skelterjohn/go.matrix"
 	"image"
 	"image/color"
 	"image/png"
 	"math"
 	"os"
+	"runtime"
 )
 
 const width = 1024
@@ -16,7 +16,10 @@ const alpha = 25.0
 const beta = 37.0
 const iterations = 150
 const dist = 4.6
+const maxDist = 100
 const fov = 39.0
+
+var threads = runtime.NumCPU()
 
 var ca = math.Cos(alpha)
 var sa = math.Sin(alpha)
@@ -71,6 +74,9 @@ func getPixel(x, y int) float64 {
 	for i := 0; i < iterations; i++ {
 		k += sdf(cx + rx * k, cy + ry * k, cz + rz * k)
 	}
+	if k > maxDist {
+		return 0
+	}
 	return k
 }
 
@@ -79,29 +85,27 @@ func main() {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	var h2 = int(math.Round(width / 2))
 	var w2 = int(math.Round(height / 2))
-
-	var max float64 = 0;
-	var min float64 = math.MaxFloat64;
-
-	for y := -h2; y < h2; y++ {
-		for x := -w2; x < w2; x++ {
-			pixel := getPixel(y, x)
-			if pixel < min {
-				min = pixel
+	row := make(chan int, threads)
+	chunk := height / threads
+	for i := 0; i < threads; i++ {
+		go func(start int){
+			end := start + chunk
+			if end > height { end = height }
+			for y := start; y < end; y++ {
+				for x := -w2; x < w2; x++ {
+					pixel := getPixel(y - h2, x)
+					result[y][x + w2] = pixel
+					col := uint8(pixel * 100)
+					img.Set(x + w2, y, color.RGBA{col, col, col, 255})
+				}
 			}
-			if pixel > max {
-				max = pixel
-			}
-			result[y + h2][x + w2] = pixel
-
-			img.Set(x + w2, y + h2,
-				color.RGBA{uint8(result[y + h2][x + w2] * 100),
-					uint8(result[y + h2][x + w2] * 100),
-					uint8(result[y + h2][x + w2] * 100) ,
-					255})
-		}
+			row <- 1
+		}(i * chunk)
 	}
-	fmt.Println("Max: %f\nMin: %f", max, min)
+
+	for i := 0; i < threads; i++ {
+		<-row
+	}
 	f, err := os.OpenFile("img.png", os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
