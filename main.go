@@ -50,8 +50,8 @@ func cube(x, y, z float64) float64 {
 }
 
 func sdf(x, y, z float64) float64 {
-	return math.Min(sphere(x, y, z), cube(x, y, z))
-	//return math.Max(-sphere(x, y, z), cube(x, y, z))
+	//return math.Min(sphere(x, y, z), cube(x, y, z))
+	return math.Max(-sphere(x, y, z), cube(x, y, z))
 }
 
 func rayDirection(x, y int) *mat.DenseMatrix {
