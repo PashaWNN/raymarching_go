@@ -20,25 +20,6 @@ const fov = 39.0
 
 var threads = runtime.NumCPU()
 
-
-func getPixel(x, y int) float64 {
-	var cx, cy, cz = camCoordinates.Get(0, 0), camCoordinates.Get(1, 0), camCoordinates.Get(2, 0)
-	var rx, ry, rz = rayDirection(x, y).Get(0, 0), rayDirection(x, y).Get(1, 0), rayDirection(x, y).Get(2, 0)
-	var dist0 = sdf(cx, cy, cz)
-	var k = dist0 + sdf(cx + rx * dist0, cy + ry * dist0, cz + rz * dist0)
-	for i := 0; i < iterations; i++ {
-		k = iteratePixel(k, cx, cy, cz, rx, ry, rz)
-	}
-	if k > maxDist {
-		return 0
-	}
-	return k
-}
-
-func iteratePixel(p float64, cx, cy, cz, rx, ry, rz float64) float64 {
-	return p + sdf(cx + rx * p, cy + ry * p, cz + rz * p)
-}
-
 func main() {
 	result := InitMatrix(width, height)
 	palette := make([]color.Color, 256)
