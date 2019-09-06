@@ -1,11 +1,10 @@
 package main
 
 import (
-	mat "github.com/skelterjohn/go.matrix"
+	"fmt"
 	"image"
 	"image/color"
-	"image/png"
-	"math"
+	"image/gif"
 	"os"
 	"runtime"
 )
@@ -14,56 +13,12 @@ const width = 1024
 const height = 1024
 const alpha = 25.0
 const beta = 37.0
-const iterations = 150
+const iterations = 100
 const dist = 4.6
 const maxDist = 100
 const fov = 39.0
 
 var threads = runtime.NumCPU()
-
-var ca = math.Cos(alpha)
-var sa = math.Sin(alpha)
-var cb = math.Cos(beta)
-var sb = math.Sin(beta)
-var rotationMatrix = mat.MakeDenseMatrixStacked([][]float64{
-	{ca * cb, -ca * sb, sa},
-	{sb, cb, 0},
-	{-cb * sa, sa * sb, ca},
-})
-
-var camCoordinates = mat.Product(rotationMatrix, mat.MakeDenseMatrixStacked([][]float64{{dist}, {0}, {0}}))
-var nullVector = mat.Scaled(mat.MakeDenseMatrixStacked([][]float64{
-	{ca * cb},
-	{sb},
-	{sa * cb},
-}), -1)
-var pixelSize = 2 * math.Tan(fov / 2) / height
-var u = mat.Scaled(mat.Product(rotationMatrix, mat.MakeDenseMatrixStacked([][]float64{{0}, {0}, {1}})), pixelSize)
-var v = mat.Scaled(mat.Product(rotationMatrix, mat.MakeDenseMatrixStacked([][]float64{{0}, {1}, {0}})), pixelSize)
-
-func sphere(x, y, z float64) float64 {
-	return math.Sqrt(math.Pow(x, 2) + math.Pow(y, 2) + math.Pow(z, 2)) - 1.2
-}
-
-func cube(x, y, z float64) float64 {
-	return math.Max(math.Abs(x), math.Max(math.Abs(y), math.Abs(z))) - 1
-}
-
-func sdf(x, y, z float64) float64 {
-	//return math.Min(sphere(x, y, z), cube(x, y, z))
-	return math.Max(-sphere(x, y, z), cube(x, y, z))
-}
-
-func rayDirection(x, y int) *mat.DenseMatrix {
-	uv := mat.Sum(mat.Scaled(u, float64(x)), mat.Scaled(v, float64(y)))
-	return mat.Sum(nullVector, uv)
-}
-
-func ray(x, y int, d float64) *mat.DenseMatrix{
-	rayDir := rayDirection(x, y)
-	normRayDir := mat.Scaled(rayDir, math.Pow(rayDir.OneNorm(), -1))
-	return mat.Sum(camCoordinates, mat.Scaled(normRayDir, d))
-}
 
 
 func getPixel(x, y int) float64 {
@@ -72,7 +27,7 @@ func getPixel(x, y int) float64 {
 	var dist0 = sdf(cx, cy, cz)
 	var k = dist0 + sdf(cx + rx * dist0, cy + ry * dist0, cz + rz * dist0)
 	for i := 0; i < iterations; i++ {
-		k += sdf(cx + rx * k, cy + ry * k, cz + rz * k)
+		k = iteratePixel(k, cx, cy, cz, rx, ry, rz)
 	}
 	if k > maxDist {
 		return 0
@@ -80,42 +35,52 @@ func getPixel(x, y int) float64 {
 	return k
 }
 
+func iteratePixel(p float64, cx, cy, cz, rx, ry, rz float64) float64 {
+	return p + sdf(cx + rx * p, cy + ry * p, cz + rz * p)
+}
+
 func main() {
-	var result [width][height]float64
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	var h2 = int(math.Round(width / 2))
-	var w2 = int(math.Round(height / 2))
+	result := InitMatrix(width, height)
+	palette := make([]color.Color, 256)
+	for i := 0; i < 256; i++ {
+		palette[i] = color.Gray{255 - uint8(i)}
+	}
+	rect := image.Rect(0, 0, width, height)
+	anim := gif.GIF{}
 	row := make(chan int, threads)
 	chunk := height / threads
-	for i := 0; i < threads; i++ {
-		go func(start int){
-			end := start + chunk
-			if end > height { end = height }
-			for y := start; y < end; y++ {
-				for x := -w2; x < w2; x++ {
-					pixel := getPixel(y - h2, x)
-					result[y][x + w2] = pixel
-					col := uint8(pixel * 100)
-					img.Set(x + w2, y, color.RGBA{col, col, col, 255})
+    for iter := 0; iter < iterations; iter++ {
+    	img := image.NewPaletted(rect, palette)
+		anim.Image = append(anim.Image, img)
+		anim.Delay = append(anim.Delay, 1)
+		for i := 0; i < threads; i++ {
+			go func(start int) {
+				end := start + chunk
+				if end > height {
+					end = height
 				}
-			}
-			row <- 1
-		}(i * chunk)
-	}
+				for y := start; y < end; y++ {
+					for x := 0; x < width; x++ {
+						result[y][x].Iterate()
+						col := result[y][x].Color()
+						//img.Set(x, y, color.RGBA{col, col, col, 255})
+						img.SetColorIndex(x, y, col)
+					}
+				}
+				row <- 1
+			}(i * chunk)
+		}
 
-	for i := 0; i < threads; i++ {
-		<-row
+		for i := 0; i < threads; i++ {
+			<-row
+		}
 	}
-	f, err := os.OpenFile("img.png", os.O_WRONLY|os.O_CREATE, 0600)
+	f, err := os.OpenFile("rgb.gif", os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
+		return
 	}
-	err = png.Encode(f, img)
-	if err != nil {
-		panic(err)
-	}
-	err = f.Close()
-	if err != nil {
-		panic(err)
-	}
+	defer f.Close()
+
+	_ = gif.EncodeAll(f, &anim)
 }
