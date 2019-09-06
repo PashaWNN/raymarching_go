@@ -9,8 +9,8 @@ import (
 	"runtime"
 )
 
-const width = 1024
-const height = 1024
+const width = 512
+const height = 512
 const alpha = 25.0
 const beta = 37.0
 const iterations = 100
